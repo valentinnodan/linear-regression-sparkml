@@ -15,8 +15,8 @@ class StandardLinearRegressionTest extends AnyFlatSpec with should.Matchers with
 
   val delta = 0.0001
   lazy val data: Dataset[_] = StandardLinearRegressionTest._data
-  lazy val vectors: Seq[Vector] = StandardLinearRegressionTest._vectors
   lazy val coefs: DenseVector[Double] = DenseVector(StandardLinearRegressionTest._coefs)
+  lazy val res: DenseVector[Double] = StandardLinearRegressionTest._res
 
   "Model" should "predict input data" in {
     val model: StandardLinearRegressionModel = new StandardLinearRegressionModel(
@@ -29,24 +29,30 @@ class StandardLinearRegressionTest extends AnyFlatSpec with should.Matchers with
 
   "Estimator" should "calculate coefs" in {
     val estimator = new StandardLinearRegression()
-      .setInputCol("features")
-      .setOutputCol("features")
+//      .setInputCol("features")
+//      .setOutputCol("features")
 
     val model = estimator.fit(data)
-
-    model.coefs(0) should be(vectors.map(_(0)).sum / vectors.length +- delta)
-    model.coefs(1) should be(vectors.map(_(1)).sum / vectors.length +- delta)
+    validateCoefs(model.coefs)
+//    model.coefs(0) should be(vectors.map(_(0)).sum / vectors.length +- delta)
+//    model.coefs(1) should be(vectors.map(_(1)).sum / vectors.length +- delta)
   }
 
 
   private def validateModel(data: DataFrame) = {
     val vector: Array[Double] = data.collect().map(_.getAs[Double](0))
 
-    vector.length should be(2)
+    vector.length should be(data.collect().length)
 
-    vector(0) should be(13.5 +- delta)
-    vector(1) should be(12.0 +- delta)
-
+    vector(0) should be(res(0) +- delta)
+    for (i <- 0 until 100) {
+      vector(i) should be(res(i) +- delta)
+    }
+  }
+  private def validateCoefs(currCoefs: DenseVector[Double]) = {
+    for (i <- 0 until coefs.length) {
+      currCoefs(i) should be(coefs(i) +- delta)
+    }
   }
 
 //  "Estimator" should "work after re-read" in {
