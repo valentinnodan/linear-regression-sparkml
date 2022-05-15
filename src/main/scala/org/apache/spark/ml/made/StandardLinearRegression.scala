@@ -1,10 +1,12 @@
 package org.apache.spark.ml.made
 
+import breeze.linalg.functions.euclideanDistance
 import breeze.linalg.{DenseMatrix, DenseVector, sum}
 import org.apache.spark.ml.attribute.AttributeGroup
+import org.apache.spark.ml.feature.VectorAssembler
 import org.apache.spark.ml.linalg.{Vector, VectorUDT, Vectors}
-import org.apache.spark.ml.param.{BooleanParam, Param, ParamMap}
-import org.apache.spark.ml.param.shared.{HasInputCol, HasOutputCol}
+import org.apache.spark.ml.param.{BooleanParam, DoubleParam, IntParam, Param, ParamMap}
+import org.apache.spark.ml.param.shared.{HasInputCol, HasLabelCol, HasOutputCol}
 import org.apache.spark.ml.stat.Summarizer
 import org.apache.spark.ml.util._
 import org.apache.spark.ml.{Estimator, Model}
@@ -14,16 +16,33 @@ import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.{DataFrame, Dataset, Encoder, Row}
 
-trait StandardLinearRegressionParams extends HasInputCol with HasOutputCol {
+trait StandardLinearRegressionParams extends HasInputCol with HasOutputCol with HasLabelCol {
   def setInputCol(value: String) : this.type = set(inputCol, value)
   def setOutputCol(value: String): this.type = set(outputCol, value)
+  def setLabelCol(value: String): this.type = set(labelCol, value)
 
-  val shiftMean = new BooleanParam(
-    this, "shiftMean","Whenever to substract mean")
-  def isShiftMean : Boolean = $(shiftMean)
-  def setShiftMean(value: Boolean) : this.type = set(shiftMean, value)
+  val iter = new IntParam(
+    this, "iter","max amount of iterations")
 
-  setDefault(shiftMean -> true)
+  val tolerance = new DoubleParam(
+    this, "tolerance","tolerance")
+
+  val learningRate = new DoubleParam(
+    this,
+    "learningRate",
+    "learning rate for regression"
+  )
+  def getIter: Double = $(iter)
+  def setIter(value: Int) : this.type = set(iter, value)
+
+  def getLearningRate: Double = $(learningRate)
+  def setLearningRate(value: Double) : this.type = set(learningRate, value)
+
+  def getTolerance: Double = $(tolerance)
+  def setTolerance(value: Double) : this.type = set(tolerance, value)
+
+  setDefault(iter -> 1000, learningRate -> 0.5, tolerance -> 1e-5)
+  setDefault(inputCol -> "features")
 
   protected def validateAndTransformSchema(schema: StructType): StructType = {
     SchemaUtils.checkColumnType(schema, getInputCol, new VectorUDT())
@@ -47,20 +66,38 @@ with DefaultParamsWritable {
     // Used to convert untyped dataframes to datasets with vectors
     implicit val encoder : Encoder[Vector] = ExpressionEncoder()
 
-    val vectors: Dataset[Vector] = dataset.select(dataset($(inputCol)).as[Vector])
+    val assembler = new VectorAssembler().setInputCols(Array(getInputCol, getLabelCol)).setOutputCol("result")
+    val vectors = assembler.transform(dataset).select("result").as[Vector]
+//    val vectors: Dataset[Vector] = dataset.select($(inputCol)).as[Vector]
 
-    val dim: Int = AttributeGroup.fromStructField((dataset.schema($(inputCol)))).numAttributes.getOrElse(
-      vectors.first().size
-    )
+//    print(vectors)
 
-    val summary = vectors.rdd.mapPartitions((data: Iterator[Vector]) => {
-      val result = data.foldLeft(new MultivariateOnlineSummarizer())(
-        (summarizer, vector) => summarizer.add(mllib.linalg.Vectors.fromBreeze(vector.asBreeze)))
-      Iterator(result)
-    }).reduce(_ merge _)
+    val iters = getIter
+    val rate = getLearningRate
+    val tol = getTolerance
+    val size: Int = vectors.first().size
+    var prevCoefs = DenseVector.fill(size, Double.PositiveInfinity)
+    var coefs = DenseVector.fill(size, 0.0)
+
+    var i = 0
+    while (i < iters && euclideanDistance(coefs.toDenseVector, prevCoefs.toDenseVector) > tol) {
+      i += 1
+      val summary = vectors.rdd.mapPartitions((data: Iterator[Vector]) => {
+        val result = data.foldLeft(new MultivariateOnlineSummarizer())(
+          (summarizer, vector) => {
+            val currX = vector.asBreeze(0 until size - 1).toDenseVector
+            val currY = currX.dot(coefs)
+            summarizer.add(mllib.linalg.Vectors.fromBreeze((currY - vector.asBreeze(-1)) * currX))
+          }
+        )
+        Iterator(result)
+      }).reduce(_ merge _)
+      prevCoefs = coefs.copy
+      coefs = coefs - rate * summary.mean.asBreeze
+    }
 
     copyValues(new StandardLinearRegressionModel(
-      summary.mean.asML)).setParent(this)
+      coefs)).setParent(this)
 
 //    val Row(row: Row) =  dataset
 //      .select(Summarizer.metrics("mean", "std").summary(dataset($(inputCol))))
@@ -92,12 +129,12 @@ class StandardLinearRegressionModel private[made](override val uid: String,
     val bCoefs = coefs
     val transformUdf = {
       dataset.sqlContext.udf.register(uid + "_transform",
-      (x : Vector) => {
-        sum(x.asBreeze.toDenseVector * bCoefs(1 until bCoefs.length))
+      (x : org.apache.spark.mllib.linalg.DenseVector) => {
+        sum(x.asBreeze.toDenseVector * bCoefs(0 until bCoefs.length))
       })
     }
-
-    dataset.withColumn($(outputCol), transformUdf(dataset($(inputCol))))
+    print(dataset(getInputCol))
+    dataset.withColumn(getOutputCol, transformUdf(dataset(this.getInputCol)))
   }
 
   override def transformSchema(schema: StructType): StructType = validateAndTransformSchema(schema)
