@@ -5,7 +5,8 @@ import com.google.common.io.Files
 import org.scalatest._
 import flatspec._
 import matchers._
-import org.apache.spark.mllib.linalg.{Matrices, Vector, Vectors}
+import org.apache.spark.ml.made.StandardLinearRegressionTest.sqlc
+import org.apache.spark.ml.linalg.{Matrices, Vector, Vectors}
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.expressions.UserDefinedFunction
 import org.apache.spark.sql.functions.{col, typedLit, udf}
@@ -13,14 +14,13 @@ import org.apache.spark.sql.functions.{col, typedLit, udf}
 import scala.util.Random
 //import org.apache.spark.ml.linalg.{Matrices, Vector, Vectors}
 import org.apache.spark.ml.param.ParamMap
-import org.apache.spark.mllib.linalg.Matrix
+import org.apache.spark.ml.linalg.Matrix
 import org.apache.spark.sql.{DataFrame, Dataset, SparkSession}
 
 class StandardLinearRegressionTest extends AnyFlatSpec with should.Matchers with WithSpark {
 
   val delta = 0.0001
   lazy val data: Dataset[_] = StandardLinearRegressionTest._data
-  lazy val dataF: Dataset[_] = StandardLinearRegressionTest._dataF
   lazy val coefs: DenseVector[Double] = DenseVector(StandardLinearRegressionTest._coefs.toArray)
   lazy val res: DenseVector[Double] = StandardLinearRegressionTest._res
   lazy val makeRes: UserDefinedFunction = StandardLinearRegressionTest._makeRes
@@ -34,12 +34,15 @@ class StandardLinearRegressionTest extends AnyFlatSpec with should.Matchers with
   }
 
 
-  "Estimator" should "calculate coefs" in {
+  "Estimator" should "calculate true coefs" in {
+    import sqlc.implicits._
     val estimator = new StandardLinearRegression()
       .setInputCol("features")
       .setOutputCol("features")
       .setLabelCol("y")
-    val ds = dataF.withColumn("y", makeRes(col("features")))
+      .setIter(10000)
+
+    val ds = data.withColumn("y", makeRes(col("features")))
     val model = estimator.fit(ds)
     validateCoefs(model.coefs)
   }
@@ -118,14 +121,6 @@ object StandardLinearRegressionTest extends WithSpark {
     ds
   }
 
-  lazy val _dataF: DataFrame = {
-    import sqlc.implicits._
-    val matrixRows = _dataset.rowIter.toSeq.map(x => Tuple1(x))
-    val ds = matrixRows.toDF("features")
-
-    ds
-  }
-
   lazy val _makeRes: UserDefinedFunction = udf { x: Vector =>
 //    val curr = x.toArray
     val coefs = DenseVector(_coefs.toArray)
@@ -133,6 +128,6 @@ object StandardLinearRegressionTest extends WithSpark {
     sum(x.asBreeze.toDenseVector * coefs(0 until coefs.length))
   }
   lazy val _coefs: Vector = Vectors.dense(1.5, 0.3, -0.7)
-  lazy val _dataset: Matrix = Matrices.dense(10, 3, DenseMatrix.rand[Double](10, 3).toArray)
+  lazy val _dataset: Matrix = Matrices.dense(100000, 3, DenseMatrix.rand[Double](100000, 3).toArray)
   lazy val _res: DenseVector[Double] = DenseVector(_dataset.multiply(_coefs.toDense).toArray)
 }

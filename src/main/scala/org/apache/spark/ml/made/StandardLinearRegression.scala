@@ -41,7 +41,7 @@ trait StandardLinearRegressionParams extends HasInputCol with HasOutputCol with 
   def getTolerance: Double = $(tolerance)
   def setTolerance(value: Double) : this.type = set(tolerance, value)
 
-  setDefault(iter -> 1000, learningRate -> 0.5, tolerance -> 1e-5)
+  setDefault(iter -> 1000, learningRate -> 0.5, tolerance -> 1e-6)
   setDefault(inputCol -> "features")
 
   protected def validateAndTransformSchema(schema: StructType): StructType = {
@@ -59,23 +59,23 @@ trait StandardLinearRegressionParams extends HasInputCol with HasOutputCol with 
 class StandardLinearRegression(override val uid: String) extends Estimator[StandardLinearRegressionModel] with StandardLinearRegressionParams
 with DefaultParamsWritable {
 
-  def this() = this(Identifiable.randomUID("standardScaler"))
+  def this() = this(Identifiable.randomUID("standardLinearRegression"))
 
   override def fit(dataset: Dataset[_]): StandardLinearRegressionModel = {
 
     // Used to convert untyped dataframes to datasets with vectors
-    implicit val encoder : Encoder[Vector] = ExpressionEncoder()
+    implicit val vectorEncoder : Encoder[Vector] = ExpressionEncoder()
 
     val assembler = new VectorAssembler().setInputCols(Array(getInputCol, getLabelCol)).setOutputCol("result")
     val vectors = assembler.transform(dataset).select("result").as[Vector]
 //    val vectors: Dataset[Vector] = dataset.select($(inputCol)).as[Vector]
-
+//    val vectorsRes: Dataset[Vector] = dataset.select($(labelCol)).as[Vector]
 //    print(vectors)
 
     val iters = getIter
     val rate = getLearningRate
     val tol = getTolerance
-    val size: Int = vectors.first().size
+    val size: Int = vectors.first().size - 1
     var prevCoefs = DenseVector.fill(size, Double.PositiveInfinity)
     var coefs = DenseVector.fill(size, 0.0)
 
@@ -85,7 +85,7 @@ with DefaultParamsWritable {
       val summary = vectors.rdd.mapPartitions((data: Iterator[Vector]) => {
         val result = data.foldLeft(new MultivariateOnlineSummarizer())(
           (summarizer, vector) => {
-            val currX = vector.asBreeze(0 until size - 1).toDenseVector
+            val currX = vector.asBreeze(0 until size).toDenseVector
             val currY = currX.dot(coefs)
             summarizer.add(mllib.linalg.Vectors.fromBreeze((currY - vector.asBreeze(-1)) * currX))
           }
