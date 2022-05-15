@@ -5,17 +5,13 @@ import com.google.common.io.Files
 import org.scalatest._
 import flatspec._
 import matchers._
-import org.apache.spark.ml.made.StandardLinearRegressionTest.sqlc
+import org.apache.spark.ml.{Pipeline, PipelineModel}
 import org.apache.spark.ml.linalg.{Matrices, Vector, Vectors}
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.expressions.UserDefinedFunction
 import org.apache.spark.sql.functions.{col, typedLit, udf}
-
-import scala.util.Random
-//import org.apache.spark.ml.linalg.{Matrices, Vector, Vectors}
-import org.apache.spark.ml.param.ParamMap
 import org.apache.spark.ml.linalg.Matrix
-import org.apache.spark.sql.{DataFrame, Dataset, SparkSession}
+import org.apache.spark.sql.{DataFrame, Dataset}
 
 class StandardLinearRegressionTest extends AnyFlatSpec with should.Matchers with WithSpark {
 
@@ -65,46 +61,49 @@ class StandardLinearRegressionTest extends AnyFlatSpec with should.Matchers with
     }
   }
 
-//  "Estimator" should "work after re-read" in {
-//
-//    val pipeline = new Pipeline().setStages(Array(
-//      new StandardLinearRegression()
-//        .setInputCol("features")
-//        .setOutputCol("features")
-//    ))
-//
-//    val tmpFolder = Files.createTempDir()
-//
-//    pipeline.write.overwrite().save(tmpFolder.getAbsolutePath)
-//
-//    val reRead = Pipeline.load(tmpFolder.getAbsolutePath)
-//
-//    val model = reRead.fit(data).stages(0).asInstanceOf[StandardLinearRegressionModel]
-//
-//    model.coefs(0) should be(vectors.map(_(0)).sum / vectors.length +- delta)
-//    model.coefs(1) should be(vectors.map(_(1)).sum / vectors.length +- delta)
-//
-//    validateModel(model, model.transform(data))
-//  }
-//
-//  "Model" should "work after re-read" in {
-//
-//    val pipeline = new Pipeline().setStages(Array(
-//      new StandardLinearRegression()
-//        .setInputCol("features")
-//        .setOutputCol("features")
-//    ))
-//
-//    val model = pipeline.fit(data)
-//
-//    val tmpFolder = Files.createTempDir()
-//
-//    model.write.overwrite().save(tmpFolder.getAbsolutePath)
-//
-//    val reRead: PipelineModel = PipelineModel.load(tmpFolder.getAbsolutePath)
-//
-//    validateModel(model.stages(0).asInstanceOf[StandardLinearRegressionModel], reRead.transform(data))
-//  }
+  "Estimator" should "work after re-read" in {
+
+    val pipeline = new Pipeline().setStages(Array(
+      new StandardLinearRegression()
+        .setInputCol("features")
+        .setOutputCol("features")
+        .setLabelCol("y")
+    ))
+    val ds = data.withColumn("y", makeRes(col("features")))
+
+    val tmpFolder = Files.createTempDir()
+
+    pipeline.write.overwrite().save(tmpFolder.getAbsolutePath)
+
+    val reRead = Pipeline.load(tmpFolder.getAbsolutePath)
+
+    val model = reRead.fit(ds).stages(0).asInstanceOf[StandardLinearRegressionModel]
+
+    validateCoefs(model.coefs)
+
+    validateModel(model.transform(ds))
+  }
+
+  "Model" should "work after re-read" in {
+
+    val pipeline = new Pipeline().setStages(Array(
+      new StandardLinearRegression()
+        .setInputCol("features")
+        .setOutputCol("features")
+        .setLabelCol("y")
+    ))
+    val ds = data.withColumn("y", makeRes(col("features")))
+
+    val model = pipeline.fit(ds)
+
+    val tmpFolder = Files.createTempDir()
+
+    model.write.overwrite().save(tmpFolder.getAbsolutePath)
+
+    val reRead: PipelineModel = PipelineModel.load(tmpFolder.getAbsolutePath)
+
+    validateModel(reRead.transform(data))
+  }
 }
 
 object StandardLinearRegressionTest extends WithSpark {

@@ -129,7 +129,7 @@ class StandardLinearRegressionModel private[made](override val uid: String,
     val bCoefs = coefs
     val transformUdf = {
       dataset.sqlContext.udf.register(uid + "_transform",
-      (x : org.apache.spark.mllib.linalg.DenseVector) => {
+      (x : org.apache.spark.ml.linalg.DenseVector) => {
         sum(x.asBreeze.toDenseVector * bCoefs(0 until bCoefs.length))
       })
     }
@@ -143,7 +143,7 @@ class StandardLinearRegressionModel private[made](override val uid: String,
     override protected def saveImpl(path: String): Unit = {
       super.saveImpl(path)
 
-      val vectors = Tuple1(coefs.data.asInstanceOf[Vector])
+      val vectors = Tuple1(Vectors.fromBreeze(coefs))
 
       sqlContext.createDataFrame(Seq(vectors)).write.parquet(path + "/vectors")
     }
